@@ -1,0 +1,71 @@
+.vagrant/
+*.log
+.DS_Store
+node_modules/
+target/
+*.class
+.idea/
+.vscode/
+bin/
+obj/
+
+# IntelliJ IDEA
+.idea/
+.vscode/
+
+# Spring Boot / Java (Maven)
+target/
+*.class
+*.jar
+*.war
+*.ear
+.classpath
+.project
+.settings/
+
+# Spring Boot / Java
+build/
+
+# React / Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.env
+.env.*
+!.env.example
+!.env.template
+dist/
+coverage/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Misc
+*.tmp
+*.temp
+*~
+*.backup
+*.bak
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+terraform/psycopg2_layer/
+terraform/*.zip
+# Security & Secrets
+secrets.yaml
+.temp-*

@@ -1,0 +1,16 @@
+dockerUsername: "otaga"
+
+# Tag des images
+imageTag: "latest"
+
+# Domaine de l'application
+domain: "ensiasy.online"
+
+# Configuration SMTP (pour le service Auth)
+smtp:
+  host: "smtp.gmail.com"
+  port: "587"
+  from: "no-reply@ensiasy.online"
+# Configuration Cloudflare (Optionnel)
+cloudflare:
+  enabled: true # Mettre à true pour utiliser Cloudflare Tunnel - false pour le mode local

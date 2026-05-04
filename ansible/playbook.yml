@@ -1,0 +1,217 @@
+---
+- name: "GitOps Infrastructure (K3s + ArgoCD) - CampusFlow"
+  hosts: all
+  become: yes
+  vars:
+    kubectl_path: /usr/local/bin/kubectl
+
+  tasks:
+
+    # Détecter le chemin du projet
+    - name: "Vérifier si on est sur Vagrant (/home/vagrant/campusflow)"
+      stat:
+        path: /home/vagrant/campusflow
+      register: vagrant_dir
+
+    - name: "Définir le chemin du projet"
+      set_fact:
+        project_path: "{{ vagrant_dir.stat.exists | ternary('/home/vagrant/campusflow', (playbook_dir + '/..') | realpath) }}"
+
+    - name: "Lire le domaine depuis values.yaml"
+      set_fact:
+        app_domain: "{{ (lookup('file', project_path + '/helm/campusflow/values.yaml') | from_yaml)['domain'] }}"
+
+    # INSTALLATION K3S
+    - name: "Vérifier si K3s est installé"
+      ansible.builtin.command: k3s --version
+      register: k3s_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Installer K3s si nécessaire"
+      ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -
+      when: k3s_check.rc != 0
+
+    - name: "Attendre que Kubernetes soit prêt"
+      ansible.builtin.wait_for:
+        path: /etc/rancher/k3s/k3s.yaml
+        state: present
+
+
+    # INSTALLATION SEALED SECRETS
+    - name: "Vérifier si Sealed Secrets Controller est déjà installé"
+      ansible.builtin.shell: "{{ kubectl_path }} get deployment sealed-secrets-controller -n kube-system"
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: sealed_secrets_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Installer Sealed Secrets Controller"
+      command: "{{ kubectl_path }} apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.5/controller.yaml"
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      when: sealed_secrets_check.rc != 0
+
+    - name: "Vérifier si kubeseal est déjà installé"
+      ansible.builtin.command: /usr/local/bin/kubeseal --version
+      register: kubeseal_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Télécharger kubeseal"
+      get_url:
+        url: https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.24.5/kubeseal-0.24.5-linux-amd64.tar.gz
+        dest: /tmp/kubeseal.tar.gz
+      when: kubeseal_check.rc != 0
+
+    - name: "Installer kubeseal"
+      unarchive:
+        src: /tmp/kubeseal.tar.gz
+        dest: /usr/local/bin
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0755'
+      become: yes
+      when: kubeseal_check.rc != 0
+
+    # VÉRIFICATION ET GÉNÉRATION DES SECRETS
+    - name: "Vérifier si le fichier secrets.yaml existe"
+      stat:
+        path: "{{ project_path }}/secrets.yaml"
+      register: secrets_file
+
+    - name: "Vérifier si le fichier sealed-secret.yml existe déjà"
+      stat:
+        path: "{{ project_path }}/helm/campusflow/templates/sealed-secret.yml"
+      register: sealed_secret_file
+
+    - name: "Générer le SealedSecret si secrets.yaml est présent"
+      ansible.builtin.shell: |
+        KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubeseal < {{ project_path }}/secrets.yaml --format yaml > {{ project_path }}/helm/campusflow/templates/sealed-secret.yml
+      when: secrets_file.stat.exists
+      changed_when: true
+
+    - name: "Échouer si aucun fichier de secret n'est trouvé"
+      ansible.builtin.fail:
+        msg: "ERREUR : Aucun fichier 'secrets.yaml' (local) ni 'sealed-secret.yml' (chiffré) n'a été trouvé. Veuillez créer 'secrets.yaml' à la racine."
+      when: not secrets_file.stat.exists and not sealed_secret_file.stat.exists
+
+
+    # INSTALLATION ARGO CD
+    - name: "Créer le namespace argocd"
+      ansible.builtin.shell: kubectl create namespace argocd
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      ignore_errors: yes
+
+    - name: "Vérifier si ArgoCD est déjà installé"
+      ansible.builtin.shell: "{{ kubectl_path }} get deployment argocd-server -n argocd"
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: argocd_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Installer Argo CD"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side --force-conflicts
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      when: argocd_check.rc != 0
+      changed_when: false
+
+    - name: "Attendre que le service argocd-server soit créé"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} get svc argocd-server -n argocd
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: svc_check
+      until: svc_check.rc == 0
+      retries: 10
+      delay: 5
+      changed_when: false
+
+    - name: "Vérifier le type du service ArgoCD"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} get svc argocd-server -n argocd -o jsonpath='{.spec.type}'
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: argocd_svc_type
+      changed_when: false
+
+    - name: "Mettre à jour le host dans argocd-ingress.yml"
+      ansible.builtin.shell: |
+        sed -i "s/host: argocd\..*/host: argocd.{{ app_domain }}/" {{ project_path }}/argocd/argocd-ingress.yml
+
+    - name: "Créer l'Ingress Argo CD"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} apply -n argocd -f {{ project_path }}/argocd/argocd-ingress.yml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: "Configurer ArgoCD en mode insecure (ConfigMap)"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} patch configmap argocd-cmd-params-cm -n argocd --type merge -p '{"data": {"server.insecure": "true"}}'
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: "Définir l'URL externe d'ArgoCD (ConfigMap)"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} patch configmap argocd-cm -n argocd --type merge -p '{"data": {"url": "https://argocd.{{ app_domain }}"}}'
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: "Appliquer le mode insecure sur le déploiement argocd-server"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} patch deployment argocd-server -n argocd --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": ["--insecure"]}]'
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: "Créer le namespace monitoring"
+      ansible.builtin.shell: kubectl create namespace monitoring
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      ignore_errors: yes
+
+    - name: "Mettre à jour les domaines et chemins dans monitoring-k8s.yml"
+      ansible.builtin.shell: |
+        sed -i "s/host: grafana\..*/host: grafana.{{ app_domain }}/" {{ project_path }}/helm/monitoring/monitoring-k8s.yml
+        sed -i "s/host: prometheus\..*/host: prometheus.{{ app_domain }}/" {{ project_path }}/helm/monitoring/monitoring-k8s.yml
+        sed -i "s|path: .*/helm/|path: {{ project_path }}/helm/|" {{ project_path }}/helm/monitoring/monitoring-k8s.yml
+
+    - name: "Déployer Grafana et Prometheus"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} apply -f {{ project_path }}/helm/monitoring/monitoring-k8s.yml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    # Déploiement CampusFlow dans ArgoCD
+    - name: "Déployer l'Application CampusFlow dans ArgoCD"
+      ansible.builtin.shell: |
+        {{ kubectl_path }} apply -f {{ project_path }}/argocd/argocd-app.yml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    # Récupération du mot de passe ArgoCD
+    - name: "Récupérer le mot de passe admin ArgoCD"
+      shell: "{{ kubectl_path }} -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: argocd_password
+      changed_when: false
+
+
+    # Résumé
+    - name: "Résumé de l'installation"
+      ansible.builtin.debug:
+        msg: 
+          - "Infrastructure GitOps prête."
+          - "Sealed Secrets est installé."
+          - "ArgoCD est installé."
+          - "Application CampusFlow : http://{{ app_domain }}"
+          - "ArgoCD : http://argocd.{{ app_domain }}"
+          - "Grafana : http://grafana.{{ app_domain }}"
+          - "Prometheus : http://prometheus.{{ app_domain }}"
+          - "Mot de passe admin ArgoCD : {{ argocd_password.stdout }}"

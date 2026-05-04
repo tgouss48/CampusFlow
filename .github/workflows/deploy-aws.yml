@@ -1,0 +1,96 @@
+name: Build and Push to AWS ECR
+
+on:
+  push:
+    branches:
+      - main # Le pipeline se lance à chaque fois que vous pushez sur la branche "main"
+
+env:
+  AWS_REGION: eu-west-3
+  AWS_ACCOUNT_ID: "683449654825"
+  ECR_REGISTRY: "683449654825.dkr.ecr.eu-west-3.amazonaws.com"
+  ECS_CLUSTER: "campusflow-cluster"
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v3
+
+      - name: Setup AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # 1. AUTH SERVICE
+      - name: Build, tag, and push Auth Service
+        env:
+          ECR_REPOSITORY: campusflow-auth
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./auth-service/Dockerfile .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 2. ANNONCES SERVICE
+      - name: Build, tag, and push Annonces Service
+        env:
+          ECR_REPOSITORY: campusflow-annonces
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./annonces-service/Dockerfile .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 3. EVENEMENTS SERVICE
+      - name: Build, tag, and push Evenements Service
+        env:
+          ECR_REPOSITORY: campusflow-evenements
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./evenements-service/Dockerfile .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 4. SOCIALE SERVICE
+      - name: Build, tag, and push Sociale Service
+        env:
+          ECR_REPOSITORY: campusflow-sociale
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./sociale-service/Dockerfile .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 5. GATEWAY SERVICE
+      - name: Build, tag, and push Gateway Service
+        env:
+          ECR_REPOSITORY: campusflow-gateway
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f ./gateway-service/Dockerfile .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 6. FRONTEND (Vite / React)
+      - name: Build and Push Frontend to S3
+        env:
+          S3_BUCKET: campus-ensias.online
+          VITE_API_URL: https://api.campus-ensias.online/api
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          aws s3 sync ./dist/ s3://$S3_BUCKET --delete
+
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service --cluster $ECS_CLUSTER --service auth --force-new-deployment
+          aws ecs update-service --cluster $ECS_CLUSTER --service annonces --force-new-deployment
+          aws ecs update-service --cluster $ECS_CLUSTER --service evenements --force-new-deployment
+          aws ecs update-service --cluster $ECS_CLUSTER --service sociale --force-new-deployment
+          aws ecs update-service --cluster $ECS_CLUSTER --service gateway --force-new-deployment

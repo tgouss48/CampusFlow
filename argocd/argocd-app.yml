@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: campusflow-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tgouss48/CampusFlow.git
+    targetRevision: HEAD
+    path: helm/campusflow
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: campusflow-config
+data:
+  # Global
+  EUREKA_SERVER_URL: "http://discovery-service:8761/eureka/"
+  EUREKA_HOSTNAME: "discovery-service"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  TOPIC_USER_PROFILE_UPDATES: "user-profile-updates"
+
+  # Auth Service
+  AUTH_PORT: "8081"
+  AUTH_DB_URL: "jdbc:postgresql://auth-postgres:5432/auth_db"
+  AUTH_DB_USERNAME: "postgres"
+  AUTH_JWT_ACCESS_EXP: "PT15M"
+  AUTH_JWT_REFRESH_EXP: "P14D"
+  AUTH_REFRESH_COOKIE_NAME: "refresh_token"
+  AUTH_REFRESH_COOKIE_SECURE: "true" # False en local
+  AUTH_REFRESH_COOKIE_SAMESITE: "Lax"
+  AUTH_REFRESH_COOKIE_PATH: "/api/auth"
+  AUTH_ALLOWED_ORIGINS: "http://{{ .Values.domain }},https://{{ .Values.domain }}"
+  AUTH_VERIFICATION_EXP: "PT24H"
+  AUTH_PW_RESET_EXP: "PT1H"
+  AUTH_MAIL_FROM: "{{ .Values.smtp.from }}"
+  AUTH_FRONTEND_URL: "https://{{ .Values.domain }}"
+  AUTH_SMTP_HOST: "{{ .Values.smtp.host }}"
+  AUTH_SMTP_PORT: "{{ .Values.smtp.port }}"
+  AUTH_SMTP_SSL_TRUST: "{{ .Values.smtp.host }}"
+  AUTH_RATE_LIMIT_MAX: "10"
+  AUTH_RATE_LIMIT_WINDOW: "PT60S"
+  AUTH_RATE_LIMIT_CLEANUP_MS: "300000"
+  AUTH_SCHEDULING_PURGE_REFRESH_CRON: "0 0 * * * *"
+  AUTH_SCHEDULING_PURGE_ACCOUNT_CRON: "0 */30 * * * *"
+
+  # Annonces Service
+  ANNONCES_PORT: "8082"
+  ANNONCES_DB_URL: "jdbc:postgresql://annonces-postgres:5432/annonces_db"
+  ANNONCES_DB_USERNAME: "postgres"
+
+  # Evenements Service
+  EVENEMENTS_PORT: "8083"
+  EVENEMENTS_DB_URL: "jdbc:postgresql://evenements-postgres:5432/evenements_db"
+  EVENEMENTS_DB_USERNAME: "postgres"
+  EVENEMENTS_INSCRIPTION_ONGOING_ENABLED: "false"
+
+  # Sociale Service
+  SOCIALE_PORT: "8084"
+  SOCIALE_DB_URL: "jdbc:postgresql://sociale-postgres:5432/sociale_db"
+  SOCIALE_DB_USERNAME: "postgres"
+  SOCIALE_PRESENCE_TIMEOUT: "PT45S"
+  SOCIALE_WS_USER_ID_ATTR: "social.userId"
+  SOCIALE_WS_TOKEN_PARAM: "access_token"
+
+  # Gateway & Discovery
+  GATEWAY_PORT: "8080"
+  GATEWAY_ALLOWED_ORIGINS: "http://{{ .Values.domain }},https://{{ .Values.domain }}"
+  DISCOVERY_PORT: "8761"
+
+  # Frontend
+  VITE_PORT: "80"
+  VITE_PROXY_TARGET: "http://gateway-service:8080"

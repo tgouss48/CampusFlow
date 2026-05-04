@@ -1,0 +1,206 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |-
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'auth-service'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['auth-service.default.svc.cluster.local:8081']
+            labels:
+              application: 'auth'
+
+      - job_name: 'annonces-service'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['annonces-service.default.svc.cluster.local:8082']
+            labels:
+              application: 'annonces'
+
+      - job_name: 'evenements-service'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['evenements-service.default.svc.cluster.local:8083']
+            labels:
+              application: 'evenements'
+
+      - job_name: 'sociale-service'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['sociale-service.default.svc.cluster.local:8084']
+            labels:
+              application: 'sociale'
+
+      - job_name: 'gateway-service'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['gateway-service.default.svc.cluster.local:8080']
+            labels:
+              application: 'gateway'
+
+      - job_name: 'discovery-service'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['discovery-service.default.svc.cluster.local:8761']
+            labels:
+              application: 'discovery'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        args:
+          - "--config.file=/etc/prometheus/prometheus.yml"
+          - "--storage.tsdb.path=/prometheus"
+        ports:
+          - containerPort: 9090
+        volumeMounts:
+          - name: prometheus-config
+            mountPath: /etc/prometheus/prometheus.yml
+            subPath: prometheus.yml
+          - name: prometheus-storage
+            mountPath: /prometheus
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: prometheus-storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        env:
+          - name: GF_SECURITY_ADMIN_USER
+            value: admin
+          - name: GF_SECURITY_ADMIN_PASSWORD
+            value: admin
+          - name: GF_USERS_ALLOW_SIGN_UP
+            value: "false"
+        ports:
+          - containerPort: 3000
+        volumeMounts:
+          - name: grafana-datasources
+            mountPath: /etc/grafana/provisioning/datasources
+          - name: grafana-dashboards
+            mountPath: /etc/grafana/provisioning/dashboards
+      volumes:
+        - name: grafana-datasources
+          hostPath:
+            path: /home/predator/Bureau/CampusFlow/helm/monitoring/monitoring/grafana/provisioning/datasources
+            type: Directory
+        - name: grafana-dashboards
+          hostPath:
+            path: /home/predator/Bureau/CampusFlow/helm/monitoring/monitoring/grafana/provisioning/dashboards
+            type: Directory
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: monitoring
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: grafana.ensiasy.online
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus-ingress
+  namespace: monitoring
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: prometheus.ensiasy.online
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus
+                port:
+                  number: 9090
